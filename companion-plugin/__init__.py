@@ -1,14 +1,19 @@
-"""Hermes Browser companion plugin — context cache for Hermes Agent.
+"""Hermes Browser companion plugin — context cache + optional browser control.
 
-Registers tools and lifecycle hooks that let the Hermes agent query the
-current browser context captured from the Hermes Browser Extension. The
-plugin is fail-soft: when the extension is not connected or no context
-has been captured, all tools gracefully report unavailable.
+Always registers:
+  - Context-caching tools (browser_context_status, browser_get_context, …)
+  - Lifecycle hooks (pre_llm_call, pre_tool_call, post_tool_call)
+  - Bundled hermes-browser skill
 
-This plugin does NOT control the browser, register API routes, or assume
-any side channel exists. It passively caches browser context from
-conversation messages (embedded by the extension as Browser Context
-Protocol prompt blocks) and from explicit tool calls.
+Additionally registers browser-control tools when
+``HERMES_BROWSER_CONTROL=true`` is set in the Hermes process environment:
+  - browser_list_tabs, browser_open_tab, browser_navigate, browser_click,
+    browser_type_text, browser_press_key, browser_scroll, browser_read_page,
+    browser_inspect_element, browser_screenshot, browser_media_control,
+    browser_controller_status
+
+The plugin is fail-soft: all tools return structured {ok, data|error} JSON
+and never raise into the Hermes runtime.
 """
 
 from __future__ import annotations
@@ -17,6 +22,7 @@ from pathlib import Path
 
 from . import hooks, tools
 from .context_store import BrowserContextStore
+from .policy import browser_control_allowed
 
 # Global store — shared between tools and hooks.
 STORE = BrowserContextStore()
@@ -112,8 +118,130 @@ def register(ctx) -> None:
     ctx.register_hook("pre_tool_call", hooks.pre_tool_call)
     ctx.register_hook("post_tool_call", hooks.post_tool_call)
 
+    # ── Browser-control tools (opt-in via HERMES_BROWSER_CONTROL=true) ─
+    if browser_control_allowed():
+        _register_browser_control_tools(ctx)
+
     # ── Bundled skill ──────────────────────────────────────────────────
     skills_dir = Path(__file__).resolve().parent / "skills"
     skill_md = skills_dir / "hermes-browser" / "SKILL.md"
     if skill_md.is_file():
         ctx.register_skill("hermes-browser", skill_md)
+
+
+def _register_browser_control_tools(ctx) -> None:  # noqa: ANN001
+    """Register the live browser-control tool suite (requires HERMES_BROWSER_CONTROL=true)."""
+    from . import browser_control_tools as bct
+    from .browser_control_schemas import (
+        SCHEMA_LIST_TABS,
+        SCHEMA_OPEN_TAB,
+        SCHEMA_NAVIGATE,
+        SCHEMA_CLICK,
+        SCHEMA_TYPE_TEXT,
+        SCHEMA_PRESS_KEY,
+        SCHEMA_SCROLL,
+        SCHEMA_READ_PAGE,
+        SCHEMA_INSPECT_ELEMENT,
+        SCHEMA_SCREENSHOT,
+        SCHEMA_MEDIA_CONTROL,
+        SCHEMA_CONTROLLER_STATUS,
+    )
+
+    _TOOLSET = "hermes-browser-control"
+
+    ctx.register_tool(
+        name="browser_list_tabs",
+        toolset=_TOOLSET,
+        schema=SCHEMA_LIST_TABS,
+        handler=bct.browser_list_tabs,
+        description="List all open browser tabs (read-only, no debugger attach).",
+        emoji="🗂️",
+    )
+    ctx.register_tool(
+        name="browser_open_tab",
+        toolset=_TOOLSET,
+        schema=SCHEMA_OPEN_TAB,
+        handler=bct.browser_open_tab,
+        description="Open a new browser tab and navigate to a URL.",
+        emoji="🔗",
+    )
+    ctx.register_tool(
+        name="browser_navigate",
+        toolset=_TOOLSET,
+        schema=SCHEMA_NAVIGATE,
+        handler=bct.browser_navigate,
+        description="Navigate the current leased tab to a URL.",
+        emoji="🧭",
+    )
+    ctx.register_tool(
+        name="browser_click",
+        toolset=_TOOLSET,
+        schema=SCHEMA_CLICK,
+        handler=bct.browser_click,
+        description="Click an element on the current leased tab.",
+        emoji="🖱️",
+    )
+    ctx.register_tool(
+        name="browser_type_text",
+        toolset=_TOOLSET,
+        schema=SCHEMA_TYPE_TEXT,
+        handler=bct.browser_type_text,
+        description="Type text into a field (never submits).",
+        emoji="⌨️",
+    )
+    ctx.register_tool(
+        name="browser_press_key",
+        toolset=_TOOLSET,
+        schema=SCHEMA_PRESS_KEY,
+        handler=bct.browser_press_key,
+        description="Press a keyboard key. Enter/Return require confirmed=true.",
+        emoji="↵",
+    )
+    ctx.register_tool(
+        name="browser_scroll",
+        toolset=_TOOLSET,
+        schema=SCHEMA_SCROLL,
+        handler=bct.browser_scroll,
+        description="Scroll the current leased tab.",
+        emoji="↕️",
+    )
+    ctx.register_tool(
+        name="browser_read_page",
+        toolset=_TOOLSET,
+        schema=SCHEMA_READ_PAGE,
+        handler=bct.browser_read_page,
+        description="Return page text and interactive element refs via accessibility snapshot.",
+        emoji="📖",
+    )
+    ctx.register_tool(
+        name="browser_inspect_element",
+        toolset=_TOOLSET,
+        schema=SCHEMA_INSPECT_ELEMENT,
+        handler=bct.browser_inspect_element,
+        description="Inspect a specific element by ref or CSS selector.",
+        emoji="🔍",
+    )
+    ctx.register_tool(
+        name="browser_screenshot",
+        toolset=_TOOLSET,
+        schema=SCHEMA_SCREENSHOT,
+        handler=bct.browser_screenshot,
+        description="Capture a PNG screenshot of the current leased tab.",
+        emoji="📸",
+    )
+    ctx.register_tool(
+        name="browser_media_control",
+        toolset=_TOOLSET,
+        schema=SCHEMA_MEDIA_CONTROL,
+        handler=bct.browser_media_control,
+        description="Play, pause, or adjust volume on media in the current tab.",
+        emoji="▶️",
+    )
+    ctx.register_tool(
+        name="browser_controller_status",
+        toolset=_TOOLSET,
+        schema=SCHEMA_CONTROLLER_STATUS,
+        handler=bct.browser_controller_status,
+        description="Show live browser-control bridge connection status.",
+        emoji="📡",
+    )

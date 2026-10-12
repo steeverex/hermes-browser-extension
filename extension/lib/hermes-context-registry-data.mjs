@@ -177,6 +177,6 @@ export default Object.freeze({
   ],
   "suffix": "-900k",
   "fallback": 256000,
-  "source": "installed-hermes-agent",
-  "sourceSha256": "051d4dde2d4e92aa6f96411df37b7ee25b9308f881be5bbaa4810cd02fd532e0"
+  "source": "hermes-upstream",
+  "sourceSha256": "c9e98d5844922ddbe46c2c7753111747fbc65b78217391185f548f5314a990d4"
 });

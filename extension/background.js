@@ -60,6 +60,11 @@ import {
   createBrowserControlArtifactClient,
   createBrowserControlArtifactHttpTransport,
 } from './lib/browser-control-artifacts.mjs';
+import {
+  HERMES_BROWSER_CONTROL_WAKE,
+  HERMES_BROWSER_CONTROL_STATUS,
+  createBrowserControlGatewayToolsHandler,
+} from './lib/browser-control-gateway-tools.mjs';
 
 const browserApiResolution = resolveBrowserApi();
 const browserApi = browserApiResolution.api;
@@ -120,6 +125,14 @@ browserControlRuntime.setDebuggerDetachHandler((event) => {
     .catch((error) => console.warn('[Hermes Browser] Debugger detach reconciliation failed:', error));
 });
 const CONTROLLER_WORKER_MESSAGE_TYPES = new Set(Object.values(CONTROLLER_WORKER_MESSAGES));
+
+const gatewayToolsHandler = typeof browserApi.storage?.local?.set === 'function'
+  ? createBrowserControlGatewayToolsHandler({
+      storageArea: browserApi.storage.local,
+      controllerWorker,
+      reconcile: reconcileControllerWorker,
+    })
+  : null;
 
 function startControllerAlarms() {
   if (typeof browserApi?.alarms?.create !== 'function') return false;
@@ -983,7 +996,11 @@ browserApi.runtime.onMessage.addListener((message, sender, sendResponse) => {
             ? getYoutubeTranscript(message)
             : message?.type === LOOPBACK_FETCH_MESSAGE
               ? handleLoopbackFetchMessage(message)
-              : null;
+              : (message?.type === HERMES_BROWSER_CONTROL_WAKE || message?.type === HERMES_BROWSER_CONTROL_STATUS)
+                ? (gatewayToolsHandler
+                    ? gatewayToolsHandler.handleMessage(message)
+                    : Promise.resolve({ ok: false, error: 'gateway_tools_unavailable' }))
+                : null;
   if (!action) return false;
   action
     .then(sendResponse)
